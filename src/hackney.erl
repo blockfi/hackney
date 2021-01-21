@@ -341,7 +341,10 @@ request(Method, #hackney_url{}=URL0, Headers0, Body, Options0) ->
                   Method, URL, Headers1, Body, Options, AbsolutePath
                  ),
       ocp:with_span_ctx(NewSpanCtx),
-      try send_request(Ref, Request)
+      try
+          Res = send_request(Ref, Request),
+          put_status_code(Res, NewSpanCtx),
+          Res
       after
         oc_trace:finish_span(NewSpanCtx),
         ocp:with_span_ctx(ParentSpanCtx)
@@ -351,7 +354,10 @@ request(Method, #hackney_url{}=URL0, Headers0, Body, Options0) ->
                   Method, URL, Headers1, Body, Options, false
                  ),
       ocp:with_span_ctx(NewSpanCtx),
-      try send_request(Ref, Request)
+      try
+          Res = send_request(Ref, Request),
+          put_status_code(Res, NewSpanCtx),
+          Res
       after
         oc_trace:finish_span(NewSpanCtx),
         ocp:with_span_ctx(ParentSpanCtx)
@@ -372,7 +378,7 @@ start_span(Method, #hackney_url{host=Host,
   ParentSpanCtx = ocp:current_span_ctx(),
   NewSpanCtx = oc_trace:start_span(SpanName, ParentSpanCtx, #{kind => ?SPAN_KIND_CLIENT,
                                                               attributes => #{<<"http.client">> => <<"hackney">>,
-                                                                              <<"http.host">> => Host,
+                                                                              <<"http.host">> => HostBin,
                                                                               <<"http.method">> => Method,
                                                                               <<"http.path">> => RawPath,
                                                                               <<"http.url">> => SpanName}}),
@@ -1012,6 +1018,23 @@ maybe_update_req(#client{dynamic=true, response_state=done}=State) ->
   hackney_manager:close_request(State);
 maybe_update_req(State) ->
   hackney_manager:update_state(State).
+
+
+put_status_code(Res, NewSpanCtx) ->
+    case Res of
+        {ok, _} ->
+            oc_trace:put_attribute(<<"http.status_code">>, 291, NewSpanCtx);
+        {ok, Status, _} ->
+            oc_trace:put_attribute(<<"http.status_code">>, Status, NewSpanCtx);
+        {ok, Status, _, _} ->
+            oc_trace:put_attribute(<<"http.status_code">>, Status, NewSpanCtx);
+        {error, {closed, _}} ->
+            oc_trace:put_attribute(<<"http.status_code">>, 591, NewSpanCtx);
+        {error, _} ->
+            oc_trace:put_attribute(<<"http.status_code">>, 592, NewSpanCtx);
+        _ ->
+            oc_trace:put_attribute(<<"http.status_code">>, 593, NewSpanCtx)
+    end.
 
 
 parse_options([], State) ->
